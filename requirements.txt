@@ -1,7 +1,1 @@
-fastapi 
-uvicorn 
-youtube-transcript-api 
-transformers 
-torch 
-accelerate
-nvidia-ml-py3
+sentencepiece
