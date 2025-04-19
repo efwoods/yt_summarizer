@@ -1,1 +1,9 @@
+youtube-transcript-api
 sentencepiece
+fastapi 
+transformers 
+torch
+protobuf
+accelerate 
+huggingface_hub
+uvicorn
