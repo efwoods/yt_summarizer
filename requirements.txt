@@ -7,3 +7,4 @@ protobuf
 accelerate 
 huggingface_hub
 uvicorn
+ipykernel

@@ -43,15 +43,12 @@ def extract_video_id(url):
 
 def download_transcript(video_url):
     # Extract video ID from URL
-    video_id = video_url.split(".be/")[-1]
+    video_id = video_url.split("v=")[-1]
 
     try:
         # Fetch the transcript
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
-
-        # Format the transcript as plain text
-        formatter = TextFormatter()
-        formatted_transcript = formatter.format_transcript(transcript)
+        formatted_transcript = " ".join([line["text"] for line in transcript])
 
         # Save to a text file
         with open(f"{video_id}_transcript.txt", "w") as file:
