@@ -60,7 +60,7 @@ def extract_video_id(url: str) -> str:
 # Function to fetch transcript with retry logic
 @retry(
     stop=stop_after_attempt(3),
-    wait=wait_fixed(2),
+    wait=wait_fixed(5),
     retry=retry_if_exception_type(Exception),
     before_sleep=lambda retry_state: logger.info(f"Retrying transcript fetch for {retry_state.fn.__name__}, attempt {retry_state.attempt_number}")
 )
@@ -129,7 +129,7 @@ async def get_transcripts(file: UploadFile):
         content = await file.read()
         urls = content.decode('utf-8').splitlines()
         urls = [url.strip() for url in urls if url.strip() and not url.strip().startswith("#")]
-        logging.info(urls)
+        #logging.info(urls)
 
         if not urls:
             raise HTTPException(status_code=400, detail="File is empty or contains no valid URLs")
