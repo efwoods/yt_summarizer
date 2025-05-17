@@ -1,10 +1,14 @@
-youtube-transcript-api
-sentencepiece
+# sentencepiece
+# transformers 
+# torch
+# protobuf
+# accelerate 
+# huggingface_hub
+# ipykernel
+######
 fastapi 
-transformers 
-torch
-protobuf
-accelerate 
-huggingface_hub
 uvicorn
-ipykernel
+youtube-transcript-api
+pydantic
+python-multipart
+tenacity
