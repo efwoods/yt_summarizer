@@ -107,7 +107,7 @@ async def download_transcript(video_url: str) -> Dict:
         # Try manual transcripts first, then auto-generated
         for transcript in transcript_list:
             try:
-                if transcript.find_transcript or transcript.is_generated:
+                if transcript.is_translatable or transcript.is_generated:
                     logger.info(f"Attempting to fetch transcript {transcript.language_code} for {video_id}")
                     transcript = fetch_transcript(transcript)
                     break
