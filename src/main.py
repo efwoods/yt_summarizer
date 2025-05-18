@@ -6,12 +6,27 @@ from typing import List, Dict, Optional
 from pydantic import BaseModel, HttpUrl
 import logging
 from tenacity import retry, stop_after_attempt, retry_if_exception_type, wait_fixed
+import redis
+import json
 
 app = FastAPI(title="YouTube Transcript Downloader API")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Redis client setup
+try:
+    redis_client = redis.Redis(
+        host=os.getenv('REDIS_HOST', 'localhost'),
+        port=6379,
+        decode_responses=True
+    )
+    redis_client.ping() # Test connection
+    logger.info("Connected to Redis")
+except redis.RedisError as e:
+    logger.error(f"Failed ot connect to Redis: {str(e)}")
+    redis_client = None
 
 # Pydantic model for single URL request
 class UrlRequest(BaseModel):
@@ -73,6 +88,18 @@ async def download_transcript(video_url: str) -> Dict:
     if not video_id:
         return {"video_id": "", "transcript": "", "status": "error", "error": "Invalid video ID"}
 
+    # Check cache
+    cache_key = f"transcript:{video_id}"
+    if redis_client:
+        try:
+            cached_result = redis_client.get(cache_key)
+            if cached_result:
+                logger.info(f"Cache hit for video_id: {video_id}")
+                return json.loads(cached_result)
+        except redis.RedisError as e:
+            logger.error(f"Redis cache error for {video_id}: {str(e)}")
+
+    # Cache miss, fetch transcript
     try:
         # Check available transcripts
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
@@ -115,7 +142,16 @@ async def download_transcript(video_url: str) -> Dict:
 
         if not formatted_transcript.strip():
             return {"video_id": video_id, "transcript": "", "status": "error", "error": "No valid transcript text found"}
-        return {"video_id": video_id, "transcript": formatted_transcript, "status": "success"}
+
+        # Cache succesful results
+        result = {"video_id": video_id, "transcript": formatted_transcript, "status": "success"}
+        if redis_client:
+            try:
+                redis_client.setex(cache_key, 86400, json.dumps(result)) # Cache for 24 hours
+                logger.info(f"Cached result for video_id: {video_id}")
+            except redis.RedisError as e:
+                logger.error(f"Failed to cache result for {video_id}: {str(e)}")
+        return result
     except Exception as e:
         logger.error(f"Error downloading transcript for {video_id}: {str(e)}")
         return {"video_id": video_id, "transcript": "", "status": "error", "error": str(e)}

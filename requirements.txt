@@ -12,3 +12,4 @@ youtube-transcript-api
 pydantic
 python-multipart
 tenacity
+redis
