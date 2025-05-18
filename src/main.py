@@ -105,14 +105,14 @@ async def download_transcript(video_url: str) -> Dict:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         transcript = None
         # Try manual transcripts first, then auto-generated
-        for t in transcript_list:
+        for transcript in transcript_list:
             try:
-                if t.is_translatable or t.is_generated:
-                    logger.info(f"Attempting to fetch transcript {t.language_code} for {video_id}")
-                    transcript = fetch_transcript(t)
+                if transcript.find_transcript or transcript.is_generated:
+                    logger.info(f"Attempting to fetch transcript {transcript.language_code} for {video_id}")
+                    transcript = fetch_transcript(transcript)
                     break
             except Exception as e:
-                logger.warning(f"Failed to fetch transcript {t.language_code} for {video_id}: {str(e)}")
+                logger.warning(f"Failed to fetch transcript {transcript.language_code} for {video_id}: {str(e)}")
                 continue
 
         if not transcript:
