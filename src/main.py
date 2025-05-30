@@ -8,6 +8,7 @@ import logging
 from tenacity import retry, stop_after_attempt, retry_if_exception_type, wait_fixed
 import redis
 import json
+import uvicorn
 
 app = FastAPI(title="YouTube Transcript Downloader API")
 
@@ -202,6 +203,10 @@ async def get_single_transcript(request: UrlRequest):
     logger.info(f"Result: {result}")
     return TranscriptResponse(**result)
 
+@app.get("/health", summary="Health Check", tags=["Utility"])
+async def health_check():
+    """Basic health check to ensure the API is running."""
+    return {"status": "ok", "message": "API is healthy"}
+
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
