@@ -47,8 +47,8 @@ def download_transcript(video_url):
 
     try:
         # Fetch the transcript
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        formatted_transcript = " ".join([line["text"] for line in transcript])
+        transcript = YouTubeTranscriptApi().fetch(video_id)
+        formatted_transcript = " ".join([line.text for line in transcript])
 
         # Save to a text file
         with open(f"{video_id}_transcript.txt", "w") as file:

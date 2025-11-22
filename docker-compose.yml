@@ -10,6 +10,7 @@ services:
       - REDIS_HOST=redis
     depends_on:
       - redis
+    restart: unless-stopped
   redis:
     image: redis:7.2
     ports:
