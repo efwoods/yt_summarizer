@@ -114,8 +114,7 @@ async def download_transcript(video_url: str) -> Dict:
     # Cache miss, fetch transcript
     try:
         # Check available transcripts
-        yta = YouTubeTranscriptApi()
-        transcript_list = yta.list_transcripts(video_id)
+        transcript_list = YouTubeTranscriptApi().list(video_id=video_id)
         transcript = None
         # Try manual transcripts first, then auto-generated
         for transcript in transcript_list:
