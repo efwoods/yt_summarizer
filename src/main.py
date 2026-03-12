@@ -9,6 +9,9 @@ from tenacity import retry, stop_after_attempt, retry_if_exception_type, wait_fi
 import redis
 import json
 import uvicorn
+import yt_dlp
+
+from datetime import timedelta
 
 app = FastAPI(title="YouTube Transcript Downloader API")
 
@@ -19,26 +22,28 @@ logger = logging.getLogger(__name__)
 # Redis client setup
 try:
     redis_client = redis.Redis(
-        host=os.getenv('REDIS_HOST', 'localhost'),
-        port=6379,
-        decode_responses=True
+        host=os.getenv("REDIS_HOST", "localhost"), port=6379, decode_responses=True
     )
-    redis_client.ping() # Test connection
+    redis_client.ping()  # Test connection
     logger.info("Connected to Redis")
 except redis.RedisError as e:
     logger.error(f"Failed ot connect to Redis: {str(e)}")
     redis_client = None
 
+
 # Pydantic model for single URL request
 class UrlRequest(BaseModel):
     url: HttpUrl
+
 
 # Pydantic model for response, allowing nullable fields
 class TranscriptResponse(BaseModel):
     video_id: Optional[str] = None
     transcript: Optional[str] = None
+    segments: Optional[List[Dict]] = None  # Add this
     status: str
     error: Optional[str] = None
+
 
 # Function to validate URL
 def is_valid_url(url: str) -> bool:
@@ -58,6 +63,7 @@ def is_valid_url(url: str) -> bool:
         logger.error(f"Error in URL validation for {url}: {str(e)}")
         return False
 
+
 # Function to extract video ID
 def extract_video_id(url: str) -> str:
     try:
@@ -73,21 +79,30 @@ def extract_video_id(url: str) -> str:
         logger.error(f"Error extracting video ID from {url}: {str(e)}")
         return ""
 
+
 # Function to fetch transcript with retry logic
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(5),
     retry=retry_if_exception_type(Exception),
-    before_sleep=lambda retry_state: logger.info(f"Retrying transcript fetch for {retry_state.fn.__name__}, attempt {retry_state.attempt_number}")
+    before_sleep=lambda retry_state: logger.info(
+        f"Retrying transcript fetch for {retry_state.fn.__name__}, attempt {retry_state.attempt_number}"
+    ),
 )
 def fetch_transcript(transcript_obj):
     return transcript_obj.fetch()
 
+
 # Function to download transcript
-async def download_transcript(video_url: str) -> Dict:
+def download_transcript(video_url: str) -> Dict:
     video_id = extract_video_id(video_url)
     if not video_id:
-        return {"video_id": "", "transcript": "", "status": "error", "error": "Invalid video ID"}
+        return {
+            "video_id": "",
+            "transcript": "",
+            "status": "error",
+            "error": "Invalid video ID",
+        }
 
     # Check cache
     cache_key = f"transcript:{video_id}"
@@ -103,73 +118,135 @@ async def download_transcript(video_url: str) -> Dict:
     # Cache miss, fetch transcript
     try:
         # Check available transcripts
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript_list = YouTubeTranscriptApi().list(video_id=video_id)
         transcript = None
         # Try manual transcripts first, then auto-generated
         for transcript in transcript_list:
             try:
                 if transcript.is_translatable or transcript.is_generated:
-                    logger.info(f"Attempting to fetch transcript {transcript.language_code} for {video_id}")
+                    logger.info(
+                        f"Attempting to fetch transcript {transcript.language_code} for {video_id}"
+                    )
                     transcript = fetch_transcript(transcript)
                     break
             except Exception as e:
-                logger.warning(f"Failed to fetch transcript {transcript.language_code} for {video_id}: {str(e)}")
+                logger.warning(
+                    f"Failed to fetch transcript {transcript.language_code} for {video_id}: {str(e)}"
+                )
                 continue
 
         if not transcript:
-            return {"video_id": video_id, "transcript": "", "status": "error", "error": "No transcript available"}
+            return {
+                "video_id": video_id,
+                "transcript": "",
+                "status": "error",
+                "error": "No transcript available",
+            }
 
         # Handle different transcript types
         formatted_transcript = ""
         if isinstance(transcript, list):
             # Standard case: list of dictionaries
-            formatted_transcript = " ".join(
-                entry.get("text", "") for entry in transcript if isinstance(entry, dict) and "text" in entry
-            )
+            # formatted_transcript = " ".join(
+            #     entry.get("text", "")
+            #     for entry in transcript
+            #     if isinstance(entry, dict) and "text" in entry
+            # )
+                # Each entry looks like: {"text": "Hello", "start": 0.5, "duration": 1.2}
+            segments = [
+                {
+                    "text": entry.get("text", ""),
+                    "start": str(timedelta(seconds=int(entry.get("start", 0)))),
+                    "duration": entry.get("duration", 0),
+                    "end": str(timedelta(seconds=int(round(entry.get("start", 0) + entry.get("duration", 0), 2))))
+                }
+                for entry in transcript
+                if isinstance(entry, dict) and "text" in entry
+            ]
+            formatted_transcript = " ".join(s["text"] for s in segments)
         else:
             # Handle non-standard cases (e.g., FetchedTranscriptSnippet)
             try:
                 # Attempt to access snippets if available
-                if hasattr(transcript, 'snippets') and isinstance(transcript.snippets, list):
+                if hasattr(transcript, "snippets") and isinstance(
+                    transcript.snippets, list
+                ):
                     formatted_transcript = " ".join(
-                        snippet.text for snippet in transcript.snippets if hasattr(snippet, 'text')
+                        snippet.text
+                        for snippet in transcript.snippets
+                        if hasattr(snippet, "text")
                     )
                 else:
-                    logger.warning(f"Unsupported transcript format for {video_id}: {type(transcript)}")
-                    return {"video_id": video_id, "transcript": "", "status": "error", "error": "Unsupported transcript format"}
+                    logger.warning(
+                        f"Unsupported transcript format for {video_id}: {type(transcript)}"
+                    )
+                    return {
+                        "video_id": video_id,
+                        "transcript": "",
+                        "status": "error",
+                        "error": "Unsupported transcript format",
+                    }
             except Exception as e:
                 logger.error(f"Error processing transcript for {video_id}: {str(e)}")
-                return {"video_id": video_id, "transcript": "", "status": "error", "error": f"Transcript processing failed: {str(e)}"}
+                return {
+                    "video_id": video_id,
+                    "transcript": "",
+                    "status": "error",
+                    "error": f"Transcript processing failed: {str(e)}",
+                }
 
         if not formatted_transcript.strip():
-            return {"video_id": video_id, "transcript": "", "status": "error", "error": "No valid transcript text found"}
+            return {
+                "video_id": video_id,
+                "transcript": "",
+                "status": "error",
+                "error": "No valid transcript text found",
+            }
 
         # Cache succesful results
-        result = {"video_id": video_id, "transcript": formatted_transcript, "status": "success"}
+        result = {
+            "video_id": video_id,
+            "transcript": formatted_transcript,
+            "status": "success",
+        }
         if redis_client:
             try:
-                redis_client.setex(cache_key, 86400, json.dumps(result)) # Cache for 24 hours
+                redis_client.setex(
+                    cache_key, 86400, json.dumps(result)
+                )  # Cache for 24 hours
                 logger.info(f"Cached result for video_id: {video_id}")
             except redis.RedisError as e:
                 logger.error(f"Failed to cache result for {video_id}: {str(e)}")
         return result
     except Exception as e:
         logger.error(f"Error downloading transcript for {video_id}: {str(e)}")
-        return {"video_id": video_id, "transcript": "", "status": "error", "error": str(e)}
+        return {
+            "video_id": video_id,
+            "transcript": "",
+            "status": "error",
+            "error": str(e),
+        }
+
 
 # FastAPI endpoint to process URLs from a file
 @app.post("/transcripts/", response_model=List[TranscriptResponse])
 async def get_transcripts(file: UploadFile):
-    if not file.filename.endswith(('.txt')):
+    if not file.filename.endswith((".txt")):
         raise HTTPException(status_code=400, detail="Only .txt files are supported")
     try:
         content = await file.read()
-        urls = content.decode('utf-8').splitlines()
-        urls = [url.strip() for url in urls if url.strip() and not url.strip().startswith("#")]
-        #logging.info(urls)
+        urls = content.decode("utf-8").splitlines()
+        urls = [
+            url.strip()
+            for url in urls
+            if url.strip() and not url.strip().startswith("#")
+        ]
+        # logging.info(urls)
 
         if not urls:
-            raise HTTPException(status_code=400, detail="File is empty or contains no valid URLs")
+            raise HTTPException(
+                status_code=400, detail="File is empty or contains no valid URLs"
+            )
 
         results = []
         for url in urls:
@@ -177,7 +254,11 @@ async def get_transcripts(file: UploadFile):
             if not is_valid_url(url):
                 logger.info(f"is_valid_url(url): {is_valid_url(url)}")
                 logger.warning(f"Invalid URL skipped: {url}")
-                results.append(TranscriptResponse(video_id="", transcript="", status="error", error="Invalid URL"))
+                results.append(
+                    TranscriptResponse(
+                        video_id="", transcript="", status="error", error="Invalid URL"
+                    )
+                )
                 continue
             else:
                 logger.info(f"is_valid_url(url): {is_valid_url(url)}")
@@ -186,10 +267,13 @@ async def get_transcripts(file: UploadFile):
         return results
     except UnicodeDecodeError as e:
         logger.error(f"Error decoding file: {str(e)}")
-        raise HTTPException(status_code=400, detail="File must be a valid UTF-8 encoded text file")
+        raise HTTPException(
+            status_code=400, detail="File must be a valid UTF-8 encoded text file"
+        )
     except Exception as e:
         logger.error(f"Error processing file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
 
 # FastAPI endpoint to process a single URL
 @app.post("/transcript/", response_model=TranscriptResponse)
@@ -197,16 +281,18 @@ async def get_single_transcript(request: UrlRequest):
     url = str(request.url)
     if not is_valid_url(url):
         raise HTTPException(status_code=400, detail="Invalid URL")
-    
+
     logger.info(f"Processing URL: {url}")
     result = await download_transcript(url)
     logger.info(f"Result: {result}")
     return TranscriptResponse(**result)
+
 
 @app.get("/health", summary="Health Check", tags=["Utility"])
 async def health_check():
     """Basic health check to ensure the API is running."""
     return {"status": "ok", "message": "API is healthy"}
 
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8081)
