@@ -9,6 +9,9 @@ from tenacity import retry, stop_after_attempt, retry_if_exception_type, wait_fi
 import redis
 import json
 import uvicorn
+import yt_dlp
+
+from datetime import timedelta
 
 app = FastAPI(title="YouTube Transcript Downloader API")
 
@@ -37,6 +40,7 @@ class UrlRequest(BaseModel):
 class TranscriptResponse(BaseModel):
     video_id: Optional[str] = None
     transcript: Optional[str] = None
+    segments: Optional[List[Dict]] = None  # Add this
     status: str
     error: Optional[str] = None
 
@@ -90,7 +94,7 @@ def fetch_transcript(transcript_obj):
 
 
 # Function to download transcript
-async def download_transcript(video_url: str) -> Dict:
+def download_transcript(video_url: str) -> Dict:
     video_id = extract_video_id(video_url)
     if not video_id:
         return {
@@ -143,11 +147,23 @@ async def download_transcript(video_url: str) -> Dict:
         formatted_transcript = ""
         if isinstance(transcript, list):
             # Standard case: list of dictionaries
-            formatted_transcript = " ".join(
-                entry.get("text", "")
+            # formatted_transcript = " ".join(
+            #     entry.get("text", "")
+            #     for entry in transcript
+            #     if isinstance(entry, dict) and "text" in entry
+            # )
+                # Each entry looks like: {"text": "Hello", "start": 0.5, "duration": 1.2}
+            segments = [
+                {
+                    "text": entry.get("text", ""),
+                    "start": str(timedelta(seconds=int(entry.get("start", 0)))),
+                    "duration": entry.get("duration", 0),
+                    "end": str(timedelta(seconds=int(round(entry.get("start", 0) + entry.get("duration", 0), 2))))
+                }
                 for entry in transcript
                 if isinstance(entry, dict) and "text" in entry
-            )
+            ]
+            formatted_transcript = " ".join(s["text"] for s in segments)
         else:
             # Handle non-standard cases (e.g., FetchedTranscriptSnippet)
             try:

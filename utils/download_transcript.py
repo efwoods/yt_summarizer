@@ -40,7 +40,7 @@ def extract_video_id(url):
         print("Video ID not found.")
         return None
 
-
+from datetime import timedelta
 def download_transcript(video_url):
     # Extract video ID from URL
     video_id = video_url.split("v=")[-1]
@@ -48,6 +48,15 @@ def download_transcript(video_url):
     try:
         # Fetch the transcript
         transcript = YouTubeTranscriptApi().fetch(video_id)
+        segments = [
+            {
+                "text": getattr(entry, "text", ""),
+                "start": str(timedelta(seconds=int(getattr(entry, "start", 0)))),
+                "duration": getattr(entry, "duration", 0),
+                "end": str(timedelta(seconds=int(round((getattr(entry, "start", 0) + getattr(entry, "duration", 0)), 2))))
+            }
+            for entry in transcript
+        ]
         formatted_transcript = " ".join([line.text for line in transcript])
 
         # Save to a text file
